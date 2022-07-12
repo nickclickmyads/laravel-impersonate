@@ -4,7 +4,9 @@ namespace Lab404\Impersonate\Controllers;
 
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Routing\Controller;
+use Illuminate\Support\Facades\Log;
 use Lab404\Impersonate\Services\ImpersonateManager;
 
 class ImpersonateController extends Controller
@@ -31,38 +33,35 @@ class ImpersonateController extends Controller
      */
     public function take(Request $request, $id, $guardName = null)
     {
-        $guardName = $guardName ?? $this->manager->getDefaultSessionGuard();
+        try {
+            $guardName = $guardName ?? $this->manager->getDefaultSessionGuard();
 
-        // Cannot impersonate yourself
-        if ($id == $request->user()->getAuthIdentifier() && ($this->manager->getCurrentAuthGuardName() == $guardName)) {
-            abort(403);
-        }
-
-        // Cannot impersonate again if you're already impersonate a user
-        if ($this->manager->isImpersonating()) {
-            abort(403);
-        }
-
-        if (!$request->user()->canImpersonate()) {
-            abort(403);
-        }
-
-        $userToImpersonate = $this->manager->findUserById($id, $guardName);
-
-        if ($userToImpersonate->canBeImpersonated()) {
-            if ($this->manager->take($request->user(), $userToImpersonate, $guardName)) {
-                $takeRedirect = $this->manager->getTakeRedirectTo();
-                if ($takeRedirect !== 'back') {
-                    return redirect()->to($takeRedirect);
-                }
+            // Cannot impersonate yourself
+            if ($id == $request->user()->getAuthIdentifier() && ($this->manager->getCurrentAuthGuardName() == $guardName)) {
+                abort(403);
             }
-        }
 
-        return redirect()->back();
+            if (!$request->user()->canImpersonate()) {
+                abort(403);
+            }
+
+            $userToImpersonate = $this->manager->findUserById($id, $guardName);
+
+            if (!$userToImpersonate->canBeImpersonated()) {
+                abort(403);
+            }
+
+            return new JsonResource([
+                'token' => $this->manager->take($request->user(), $userToImpersonate, $guardName)
+            ]);
+        } catch (\Throwable $e) {
+            Log::info($e->getMessage(), $e->getTrace());
+            throw $e;
+        }
     }
 
     /**
-     * @return RedirectResponse
+     * @return JsonResource
      */
     public function leave()
     {
@@ -74,8 +73,7 @@ class ImpersonateController extends Controller
 
         $leaveRedirect = $this->manager->getLeaveRedirectTo();
         if ($leaveRedirect !== 'back') {
-            return redirect()->to($leaveRedirect);
+            return new JsonResource(['redirect_url' => $leaveRedirect]);
         }
-        return redirect()->back();
     }
 }
